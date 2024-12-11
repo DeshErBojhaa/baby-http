@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Read, Write};
 #[allow(unused_imports)]
 use std::net::TcpListener;
 
@@ -8,8 +8,16 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(mut _stream) => {
-                _ = _stream.write("HTTP/1.1 200 OK\r\n\r\n".as_bytes()).unwrap();
-                println!("accepted new connection la la la");
+                let mut buf = [0; 1024];
+                _ = _stream.read(&mut buf);
+
+                let ss: String = buf.iter().map(|&x| x as char).collect();
+                let ss = ss.split("\r\n").collect::<Vec<&str>>()[0].split_ascii_whitespace().collect::<Vec<&str>>()[1];
+                let mut response = "HTTP/1.1 200 OK\r\n\r\n";
+                if ss != "/" {
+                    response = "HTTP/1.1 404 Not Found\r\n\r\n";  
+                } 
+                _ = _stream.write(response.as_bytes()).unwrap();
             }
             Err(e) => {
                 println!("error: {}", e);
