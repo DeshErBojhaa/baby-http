@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Read;
 #[allow(unused_imports)]
 use std::io::{BufRead, BufReader, Error, Write};
@@ -10,14 +11,19 @@ fn handle_client(mut stream: std::net::TcpStream) {
     let mut first_line = String::new();
     reader.read_line(&mut first_line).unwrap();
     
-    let mut headers = Vec::new();
+    let mut headers = HashMap::new();
     loop {
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
         if line == "\r\n" || line.is_empty() {
             break;
         }
-        headers.push(line);
+        if let Some((key, value)) = line.split_once(": ") {
+            headers.insert(
+                key.trim().to_string(),
+                value.trim_end().to_string()
+            );
+        }
     }
 
     let var = first_line.split_ascii_whitespace().nth(1).unwrap();
@@ -29,18 +35,24 @@ fn handle_client(mut stream: std::net::TcpStream) {
             .to_string()
         }
         ["GET", p] if p.starts_with("/echo") => {
+            let invalid_encoding = "invalid-encoding".to_string();
+            let encoding_header = String::from("Accept-Encoding");
+            let empty_encoding = String::from("");
+            let mut encoding = headers.get(&encoding_header)
+            .unwrap_or(&invalid_encoding);
+            if encoding != "gzip" {
+                encoding = &empty_encoding;
+            }
             let content = &var[6..];
             format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: {}\r\nContent-Length: {}\r\n\r\n{}",
+                encoding,
                 content.len(),
                 content
             )
         }
         ["GET", "/user-agent"] => {
-            let user_agent = headers[headers.len() - 1]
-                .split_ascii_whitespace()
-                .nth(1)
-                .unwrap();
+            let user_agent = headers.get("User-Agent").unwrap();
             format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
                 user_agent.len(),
@@ -67,11 +79,7 @@ fn handle_client(mut stream: std::net::TcpStream) {
             let file_name = &var[7..];
             let directory = std::env::args().nth(2).unwrap_or_else(|| "/tmp/".to_string());
             let file_path = format!("{}{}", directory, file_name);
-            let content_length = headers.iter()
-                .find(|line| line.starts_with("Content-Length:")).unwrap()
-                .split_ascii_whitespace().nth(1)
-                .and_then(|len| len.parse::<usize>().ok())
-                .unwrap_or(0);
+            let content_length = headers.get("Content-Length").unwrap().parse::<usize>().unwrap();
 
             let mut data = vec![0; content_length];
             reader.read_exact(&mut data).unwrap();
