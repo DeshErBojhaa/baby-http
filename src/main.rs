@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::io::Read;
-#[allow(unused_imports)]
 use std::io::{BufRead, BufReader, Error, Write};
 use std::net::TcpListener;
 use std::thread;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 
 fn handle_client(mut stream: std::net::TcpStream) {
     let mut reader = BufReader::new(&mut stream);
@@ -29,38 +30,49 @@ fn handle_client(mut stream: std::net::TcpStream) {
     let var = first_line.split_ascii_whitespace().nth(1).unwrap();
     let verb = first_line.split_ascii_whitespace().next().unwrap();
 
-    let resp = match [verb, var] {
+    match [verb, var] {
         ["GET", "/"] => {
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n"
-            .to_string()
+            let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
+            stream.write_all(resp.as_bytes()).unwrap();
         }
         ["GET", p] if p.starts_with("/echo") => {
             let invalid_encoding = "invalid-encoding".to_string();
             let encoding_header = String::from("Accept-Encoding");
-            let gzip = String::from("gzip");
             let empty_encoding = String::from("");
-            let mut encoding = headers.get(&encoding_header)
-            .unwrap_or(&invalid_encoding);
+            let mut encoding = headers.get(&encoding_header).unwrap_or(&invalid_encoding);
+            let content = &var[6..];
+
             if encoding.contains("gzip") {
-                encoding = &gzip;
+                let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                encoder.write_all(content.as_bytes()).unwrap();
+                let compressed_content = encoder.finish().unwrap();
+                let mut resp = Vec::new();
+                resp.extend_from_slice("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip".as_bytes());
+                resp.extend_from_slice(format!("\r\nContent-Length: {}\r\n\r\n", compressed_content.len()).as_bytes());
+                resp.extend_from_slice(&compressed_content);
+                
+                stream.write_all(&resp).unwrap();
+                return;
             } else {
                 encoding = &empty_encoding;
             }
-            let content = &var[6..];
-            format!(
+
+            let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: {}\r\nContent-Length: {}\r\n\r\n{}",
                 encoding,
                 content.len(),
-                content
-            )
+                content,
+            );
+            stream.write_all(resp.as_bytes()).unwrap();
         }
         ["GET", "/user-agent"] => {
             let user_agent = headers.get("User-Agent").unwrap();
-            format!(
+            let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
                 user_agent.len(),
                 user_agent
-            )
+            );
+            stream.write_all(resp.as_bytes()).unwrap();
         }
         ["GET", p] if p.starts_with("/files") => {
             let file_name = &var[7..];
@@ -69,13 +81,16 @@ fn handle_client(mut stream: std::net::TcpStream) {
             
             match std::fs::read_to_string(file_path) {
                 Ok(content) => {
-                    format!(
+                    let resp = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
                         content.len(),
                         content
-                    )
+                    );
+                    stream.write_all(resp.as_bytes()).unwrap();
                 }
-                Err(_) => "HTTP/1.1 404 Not Found\r\n\r\n".to_string(),
+                Err(_) => {
+                    stream.write_all("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes()).unwrap();
+                },
             }
         }
         ["POST", p] if p.starts_with("/files") => {
@@ -88,13 +103,15 @@ fn handle_client(mut stream: std::net::TcpStream) {
             reader.read_exact(&mut data).unwrap();
 
             match std::fs::write(file_path, data) {
-                Ok(_) => "HTTP/1.1 201 Created\r\n\r\n".to_string(),
-                Err(_) => "HTTP/1.1 500 Internal Server Error\r\n\r\n".to_string(),
+                Ok(_) => stream.write_all("HTTP/1.1 201 Created\r\n\r\n".as_bytes()).unwrap(),
+                Err(_) => stream.write_all("HTTP/1.1 500 Internal Server Error\r\n\r\n".as_bytes()).unwrap(),
             }
         }
-        _ => "HTTP/1.1 404 Not Found\r\n\r\n".to_string(),
+        _ => {
+            stream.write_all("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes()).unwrap();
+        },
     };
-    stream.write_all(resp.as_bytes()).unwrap();
+    
 }
 
 fn main() -> Result<(), Error> {
