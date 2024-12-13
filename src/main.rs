@@ -36,6 +36,22 @@ fn handle_client(mut stream: std::net::TcpStream) {
                 user_agent
             )
         }
+        p if p.starts_with("/files") => {
+            let file_name = &var[7..];
+            let directory = std::env::args().nth(2).unwrap_or_else(|| "/tmp/".to_string());
+            let file_path = format!("{}{}", directory, file_name);
+            
+            match std::fs::read_to_string(file_path) {
+                Ok(content) => {
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
+                        content.len(),
+                        content
+                    )
+                }
+                Err(_) => "HTTP/1.1 404 Not Found\r\n\r\n".to_string(),
+            }
+        }
         _ => "HTTP/1.1 404 Not Found\r\n\r\n".to_string(),
     };
     stream.write_all(resp.as_bytes()).unwrap();
