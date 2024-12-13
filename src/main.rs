@@ -37,10 +37,13 @@ fn handle_client(mut stream: std::net::TcpStream) {
         ["GET", p] if p.starts_with("/echo") => {
             let invalid_encoding = "invalid-encoding".to_string();
             let encoding_header = String::from("Accept-Encoding");
+            let gzip = String::from("gzip");
             let empty_encoding = String::from("");
             let mut encoding = headers.get(&encoding_header)
             .unwrap_or(&invalid_encoding);
-            if encoding != "gzip" {
+            if encoding.contains("gzip") {
+                encoding = &gzip;
+            } else {
                 encoding = &empty_encoding;
             }
             let content = &var[6..];
